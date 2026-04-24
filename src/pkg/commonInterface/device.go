@@ -5,17 +5,17 @@ import (
 	"log/slog"
 
 	"github.com/sstallion/go-hid"
-	"voxors.org/KeyTray/src/pkg/keychronM3"
+	"voxors.org/KeyTray/src/pkg/driver/keychronM3"
 )
 
 type Device struct {
-	DeviceName  string
-	BatteryInfo BatteryInfo
+	DeviceName string
+	Driver     Driver
 }
 
 func GetAvailableDevices() []Device {
 	var devices []Device
-	// The Keychron m3 mouse support use multiple device
+	// The Keychron M3 mouse support use multiple device
 	// there is a risk that a user could plug two Keychron M3
 	// and finding the mismatched dongle and device. But it minimal compared
 	// to the pain of dealing with finding the correct match between
@@ -24,16 +24,16 @@ func GetAvailableDevices() []Device {
 	keychronM3MouseFound := false
 	hid.Enumerate(hid.VendorIDAny, hid.ProductIDAny, func(info *hid.DeviceInfo) error {
 		if keychronM3.CheckHidInfoValid(info) {
-			maybeM3MouseBattery := keychronM3.NewM3MouseBattery(info)
-			if maybeM3MouseBattery.IsOk() && !keychronM3MouseFound {
+			maybeKeychronM3Driver := keychronM3.NewKeychronM3Driver(info)
+			if maybeKeychronM3Driver.IsOk() && !keychronM3MouseFound {
 				slog.Info(
-					"Keychron M3 mouse battery device discovered",
+					"Keychron M3 mouse discovered",
 					"Vendor ID", fmt.Sprintf("0x%x", info.VendorID),
 					"Product ID", fmt.Sprintf("0x%x", info.ProductID),
 				)
 				devices = append(devices, Device{
-					DeviceName:  "Keychron M3",
-					BatteryInfo: maybeM3MouseBattery.MustGet(),
+					DeviceName: "Keychron M3",
+					Driver:     maybeKeychronM3Driver.MustGet(),
 				})
 				keychronM3MouseFound = true
 			}

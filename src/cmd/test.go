@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"time"
@@ -22,22 +23,32 @@ func setupLogger() {
 func main() {
 	setupLogger()
 	devices := commoninterface.GetAvailableDevices()
-	tempPourcentageSpam := 0
+	validDevices := make([]commoninterface.Device, 0)
+	for _, device := range devices {
+		err := device.Driver.Init(context.Background())
+		if err != nil {
+			slog.Error("Failed to init driver", "device", device, "err", err)
+		} else {
+			device.Driver.StartBackgroundCheck(context.Background())
+			validDevices = append(validDevices, device)
+		}
+	}
+	tempPercentageSpam := 0
 	for {
-		for _, device := range devices {
-			pourcentage, err := device.BatteryInfo.Pourcentage().Get()
-			if err != nil {
-				slog.Error("error", "msg", err)
+		for _, device := range validDevices {
+			percentage, presence := device.Driver.BatteryPercentage().Get()
+			if !presence {
+				slog.Debug("Percentage do not exist")
 				continue
 			}
 
-			if tempPourcentageSpam != pourcentage {
-				tempPourcentageSpam = pourcentage
+			if tempPercentageSpam != percentage {
+				tempPercentageSpam = percentage
 
 				slog.Info(
 					"Battery update",
 					"device", device.DeviceName,
-					"pourcentage", pourcentage)
+					"percentage", percentage)
 			}
 		}
 		time.Sleep(1 * time.Second)

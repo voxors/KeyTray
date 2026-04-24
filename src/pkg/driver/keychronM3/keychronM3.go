@@ -1,6 +1,7 @@
 package keychronM3
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -18,11 +19,11 @@ const (
 	BATTERY_USAGE_PAGE = 140
 )
 
-type m3MouseBattery struct {
-	dongleMutex             sync.Mutex
-	deviceMutex             sync.Mutex
-	currentPourcentage      mo.Option[int]
-	currentPourcentageMutex sync.RWMutex
+type keychronM3Info struct {
+	dongleMutex     sync.Mutex
+	deviceMutex     sync.Mutex
+	percentage      mo.Option[int]
+	percentageMutex sync.RWMutex
 }
 
 var (
@@ -41,41 +42,47 @@ func CheckHidInfoValid(hidDevice *hid.DeviceInfo) bool {
 	return false
 }
 
-func NewM3MouseBattery(hidDevice *hid.DeviceInfo) mo.Result[*m3MouseBattery] {
+func NewKeychronM3Driver(hidDevice *hid.DeviceInfo) mo.Result[*keychronM3Info] {
 	if hidDevice.VendorID != VENDOR_ID ||
 		hidDevice.ProductID != PRODUCT_ID_DONGLE &&
 			hidDevice.ProductID != PRODUCT_ID_DEVICE {
-		return mo.Err[*m3MouseBattery](ErrInvalidDevice)
+		return mo.Err[*keychronM3Info](ErrInvalidDevice)
 	}
 
-	return mo.Ok(&m3MouseBattery{
-		dongleMutex:             sync.Mutex{},
-		deviceMutex:             sync.Mutex{},
-		currentPourcentage:      mo.None[int](),
-		currentPourcentageMutex: sync.RWMutex{},
+	return mo.Ok(&keychronM3Info{
+		dongleMutex:     sync.Mutex{},
+		deviceMutex:     sync.Mutex{},
+		percentage:      mo.None[int](),
+		percentageMutex: sync.RWMutex{},
 	})
 }
 
-func (m *m3MouseBattery) setCurrentPourcentage(pourcentage int) {
-	m.currentPourcentageMutex.Lock()
-	defer m.currentPourcentageMutex.Unlock()
-	m.currentPourcentage = mo.Some(pourcentage)
+func (k *keychronM3Info) setCurrentPercentage(percentage int) {
+	k.percentageMutex.Lock()
+	defer k.percentageMutex.Unlock()
+	k.percentage = mo.Some(percentage)
 }
 
-func (m *m3MouseBattery) getCurrentPourcentage() mo.Option[int] {
-	m.currentPourcentageMutex.RLock()
-	defer m.currentPourcentageMutex.RUnlock()
-	return m.currentPourcentage
+func (k *keychronM3Info) getCurrentPercentage() mo.Option[int] {
+	k.percentageMutex.RLock()
+	defer k.percentageMutex.RUnlock()
+	return k.percentage
 }
 
-func (m *m3MouseBattery) startWorkers() {
-	go m.workerPourcentageInteruptListener(PRODUCT_ID_DEVICE)
-	go m.workerPourcentageInteruptListener(PRODUCT_ID_DONGLE)
+func (k *keychronM3Info) StartBackgroundCheck(ctx context.Context) {
+	go k.workerPercentageInteruptListener(ctx, PRODUCT_ID_DEVICE)
+	go k.workerPercentageInteruptListener(ctx, PRODUCT_ID_DONGLE)
 }
 
-func (m *m3MouseBattery) workerPourcentageInteruptListener(productID int) {
+func (k *keychronM3Info) workerPercentageInteruptListener(ctx context.Context, productID int) {
 	deviceNotFoundWarmed := false
 	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
 		var deviceInfo *hid.DeviceInfo
 		hid.Enumerate(VENDOR_ID, hid.ProductIDAny, func(info *hid.DeviceInfo) error {
 			if deviceInfo == nil &&
@@ -95,17 +102,21 @@ func (m *m3MouseBattery) workerPourcentageInteruptListener(productID int) {
 				)
 				deviceNotFoundWarmed = true
 			}
-			time.Sleep(5 * time.Second)
-			continue
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+				continue
+			}
 		}
 		deviceNotFoundWarmed = false
 
 		var mutex *sync.Mutex
 		switch deviceInfo.ProductID {
 		case PRODUCT_ID_DONGLE:
-			mutex = &m.dongleMutex
+			mutex = &k.dongleMutex
 		case PRODUCT_ID_DEVICE:
-			mutex = &m.deviceMutex
+			mutex = &k.deviceMutex
 		}
 		if mutex != nil {
 			mutex.Lock()
@@ -116,7 +127,20 @@ func (m *m3MouseBattery) workerPourcentageInteruptListener(productID int) {
 			continue
 		}
 
+		connectionCtx, connCancel := context.WithCancel(ctx)
+		go func(device *hid.Device, context context.Context) {
+			<-context.Done()
+			device.Close()
+		}(device, connectionCtx)
+
+	ReadLoopLabel:
 		for {
+			select {
+			case <-connectionCtx.Done():
+				break ReadLoopLabel
+			default:
+			}
+
 			buffer := make([]byte, 64)
 			readBytes, err := device.Read(buffer)
 			if err != nil {
@@ -126,23 +150,25 @@ func (m *m3MouseBattery) workerPourcentageInteruptListener(productID int) {
 
 			if readBytes > 4 {
 				slog.Debug(
-					"Keychron m3 Mouse buffer",
+					"Keychron M3 Mouse buffer",
 					"productID", fmt.Sprintf("0x%x", deviceInfo.ProductID),
 					"buffer", fmt.Sprintf("% x", buffer),
 				)
 
 				if buffer[1] == 0xE2 {
-					m.setCurrentPourcentage(int(buffer[5]))
+					k.setCurrentPercentage(int(buffer[5]))
 				}
 			}
 		}
 
-		device.Close()
-		mutex.Unlock()
+		connCancel()
+		if mutex != nil {
+			mutex.Unlock()
+		}
 	}
 }
 
-func (m *m3MouseBattery) getPourcentageThroughtFeatureReport() mo.Result[int] {
+func (k *keychronM3Info) getPercentageThroughtFeatureReport(ctx context.Context) mo.Result[int] {
 	var deviceInfo *hid.DeviceInfo
 	hid.Enumerate(VENDOR_ID, hid.ProductIDAny, func(info *hid.DeviceInfo) error {
 		if deviceInfo == nil && CheckHidInfoValid(info) {
@@ -158,9 +184,9 @@ func (m *m3MouseBattery) getPourcentageThroughtFeatureReport() mo.Result[int] {
 	var mutex *sync.Mutex
 	switch deviceInfo.ProductID {
 	case PRODUCT_ID_DONGLE:
-		mutex = &m.dongleMutex
+		mutex = &k.dongleMutex
 	case PRODUCT_ID_DEVICE:
-		mutex = &m.deviceMutex
+		mutex = &k.deviceMutex
 	}
 	if mutex != nil {
 		mutex.Lock()
@@ -178,10 +204,16 @@ func (m *m3MouseBattery) getPourcentageThroughtFeatureReport() mo.Result[int] {
 	var lasterr error
 	var retries int
 	for retries = range 5 {
+		select {
+		case <-ctx.Done():
+			return mo.Err[int](ctx.Err())
+		default:
+		}
+
 		buffer[0] = 0x51
 		readlen, err := device.GetFeatureReport(buffer)
 		slog.Debug(
-			"Keychron m3 Mouse buffer",
+			"Keychron M3 Mouse buffer",
 			"productID", fmt.Sprintf("%x", deviceInfo.ProductID),
 			"buffer", fmt.Sprintf("% x", buffer),
 		)
@@ -202,18 +234,16 @@ func (m *m3MouseBattery) getPourcentageThroughtFeatureReport() mo.Result[int] {
 		return mo.Err[int](lasterr)
 	}
 
-	pourcentage := int(buffer[11])
-	m.setCurrentPourcentage(pourcentage)
-	return mo.Ok(pourcentage)
+	percentage := int(buffer[11])
+	k.setCurrentPercentage(percentage)
+	return mo.Ok(percentage)
 }
 
-func (m *m3MouseBattery) Pourcentage() mo.Result[int] {
-	pourcentage, presence := m.getCurrentPourcentage().Get()
-	if !presence {
-		result := m.getPourcentageThroughtFeatureReport()
-		m.startWorkers()
-		return result
-	}
+func (k *keychronM3Info) Init(ctx context.Context) error {
+	_, err := k.getPercentageThroughtFeatureReport(ctx).Get()
+	return err
+}
 
-	return mo.Ok(pourcentage)
+func (k *keychronM3Info) BatteryPercentage() mo.Option[int] {
+	return k.getCurrentPercentage()
 }
