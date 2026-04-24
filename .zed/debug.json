@@ -1,0 +1,15 @@
+// Project-local debug tasks
+//
+// For more documentation on how to configure debug tasks,
+// see: https://zed.dev/docs/debugger
+[
+  {
+    "label": "Run test",
+    "adapter": "Delve",
+    "request": "launch",
+    "mode": "debug",
+    "program": "./src/cmd",
+    "cwd": "${ZED_WORKTREE_ROOT}/build",
+    "output": "${ZED_WORKTREE_ROOT}/build/KeyTray",
+  },
+]

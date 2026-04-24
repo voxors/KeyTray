@@ -21,15 +21,23 @@ func setupLogger() {
 
 func main() {
 	setupLogger()
-	slog.Info("hello world!")
-
 	devices := commoninterface.GetAvailableDevices()
-
+	tempPourcentageSpam := 0
 	for {
 		for _, device := range devices {
-			slog.Info(
-				"device found",
-				"pourcentage", device.BatteryInfo.Pourcentage())
+			pourcentage, err := device.BatteryInfo.Pourcentage().Get()
+			if err != nil {
+				slog.Error("error", "msg", err)
+				continue
+			}
+
+			if tempPourcentageSpam != pourcentage {
+				tempPourcentageSpam = pourcentage
+
+				slog.Info(
+					"device found",
+					"pourcentage", pourcentage)
+			}
 		}
 		time.Sleep(1 * time.Second)
 	}
