@@ -27,7 +27,7 @@ func GetAvailableDevices() []Device {
 			maybeM3MouseBattery := keychronM3.NewM3MouseBattery(info)
 			if maybeM3MouseBattery.IsOk() && !keychronM3MouseFound {
 				slog.Info(
-					"M3 mouse battery device discovered",
+					"Keychron M3 mouse battery device discovered",
 					"Vendor ID", fmt.Sprintf("0x%x", info.VendorID),
 					"Product ID", fmt.Sprintf("0x%x", info.ProductID),
 				)

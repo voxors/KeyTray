@@ -35,7 +35,8 @@ func main() {
 				tempPourcentageSpam = pourcentage
 
 				slog.Info(
-					"device found",
+					"Battery update",
+					"device", device.DeviceName,
 					"pourcentage", pourcentage)
 			}
 		}
