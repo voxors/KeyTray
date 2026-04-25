@@ -16,9 +16,8 @@ type Keytray struct {
 
 func Init() mo.Result[Keytray] {
 	item, err := tray.New(
-		tray.ItemID("voxors.org/keytray"),
+		tray.ItemID("Keytray"),
 		tray.ItemTitle("Keytray"),
-		tray.ItemIconName("battery-030"),
 	)
 	if err != nil {
 		return mo.Err[Keytray](err)
