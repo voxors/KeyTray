@@ -10,6 +10,7 @@ import (
 
 	"github.com/samber/mo"
 	"github.com/sstallion/go-hid"
+	"github.com/voxors/KeyTray/src/pkg/broadcast"
 )
 
 const (
@@ -20,10 +21,11 @@ const (
 )
 
 type keychronM3Info struct {
-	dongleMutex     sync.Mutex
-	deviceMutex     sync.Mutex
-	percentage      mo.Option[int]
-	percentageMutex sync.RWMutex
+	dongleMutex            sync.Mutex
+	deviceMutex            sync.Mutex
+	batteryPercentage      mo.Option[int]
+	batteryPercentageMutex sync.RWMutex
+	batteryBroadcast       broadcast.Broadcast[int]
 }
 
 var (
@@ -50,23 +52,25 @@ func NewKeychronM3Driver(hidDevice *hid.DeviceInfo) mo.Result[*keychronM3Info] {
 	}
 
 	return mo.Ok(&keychronM3Info{
-		dongleMutex:     sync.Mutex{},
-		deviceMutex:     sync.Mutex{},
-		percentage:      mo.None[int](),
-		percentageMutex: sync.RWMutex{},
+		dongleMutex:            sync.Mutex{},
+		deviceMutex:            sync.Mutex{},
+		batteryPercentage:      mo.None[int](),
+		batteryPercentageMutex: sync.RWMutex{},
+		batteryBroadcast:       broadcast.NewBroadcast[int](),
 	})
 }
 
 func (k *keychronM3Info) setCurrentPercentage(percentage int) {
-	k.percentageMutex.Lock()
-	defer k.percentageMutex.Unlock()
-	k.percentage = mo.Some(percentage)
+	k.batteryPercentageMutex.Lock()
+	defer k.batteryPercentageMutex.Unlock()
+	k.batteryPercentage = mo.Some(percentage)
+	k.batteryBroadcast.Send(percentage)
 }
 
 func (k *keychronM3Info) getCurrentPercentage() mo.Option[int] {
-	k.percentageMutex.RLock()
-	defer k.percentageMutex.RUnlock()
-	return k.percentage
+	k.batteryPercentageMutex.RLock()
+	defer k.batteryPercentageMutex.RUnlock()
+	return k.batteryPercentage
 }
 
 func (k *keychronM3Info) StartBackgroundCheck(ctx context.Context) {
@@ -246,4 +250,12 @@ func (k *keychronM3Info) Init(ctx context.Context) error {
 
 func (k *keychronM3Info) BatteryPercentage() mo.Option[int] {
 	return k.getCurrentPercentage()
+}
+
+func (k *keychronM3Info) SubscribeBatteryPercentage() chan int {
+	return k.batteryBroadcast.AddListener()
+}
+
+func (k *keychronM3Info) UnsubscribeBatteryPercentage(channel chan int) {
+	k.batteryBroadcast.RemoveListener(channel)
 }

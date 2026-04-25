@@ -7,7 +7,8 @@ import (
 	"time"
 
 	"github.com/lmittmann/tint"
-	commoninterface "voxors.org/KeyTray/src/pkg/commonInterface"
+	"github.com/voxors/KeyTray/src/pkg/driver/device"
+	"github.com/voxors/KeyTray/src/pkg/tray"
 )
 
 func setupLogger() {
@@ -15,15 +16,22 @@ func setupLogger() {
 	slog.SetDefault(slog.New(
 		tint.NewHandler(w, &tint.Options{
 			Level:      slog.LevelDebug,
-			TimeFormat: time.Kitchen,
+			TimeFormat: time.DateTime,
 		}),
 	))
 }
 
 func main() {
 	setupLogger()
-	devices := commoninterface.GetAvailableDevices()
-	validDevices := make([]commoninterface.Device, 0)
+
+	keytray, err := tray.Init().Get()
+	if err != nil {
+		slog.Error("Failed to create tray icon", "error", err)
+	}
+	defer keytray.Close()
+
+	devices := device.GetAvailableDevices()
+	validDevices := make([]device.Device, 0)
 	for _, device := range devices {
 		err := device.Driver.Init(context.Background())
 		if err != nil {
@@ -33,6 +41,9 @@ func main() {
 			validDevices = append(validDevices, device)
 		}
 	}
+
+	keytray.SetDevices(devices)
+	keytray.StartDeviceWatcher(context.Background())
 	tempPercentageSpam := 0
 	for {
 		for _, device := range validDevices {

@@ -1,11 +1,11 @@
-package commoninterface
+package device
 
 import (
 	"fmt"
 	"log/slog"
 
 	"github.com/sstallion/go-hid"
-	"voxors.org/KeyTray/src/pkg/driver/keychronM3"
+	"github.com/voxors/KeyTray/src/pkg/driver/keychronM3"
 )
 
 type Device struct {
