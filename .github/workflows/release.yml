@@ -26,10 +26,10 @@ jobs:
 
       - name: Build Binary
         run: |
-          go build -o keytray-linux ./src/cmd/test.go
+          go build -o keytray ./src/cmd/
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: keytray-linux
+          files: keytray
           generate_release_notes: true

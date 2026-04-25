@@ -25,10 +25,10 @@ jobs:
 
       - name: Build
         run: |
-          go build -o keytray-linux ./src/cmd/test.go
+          go build -o keytray ./src/cmd/
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: keytray-linux
-          path: keytray-linux
+          name: keytray
+          path: keytray
