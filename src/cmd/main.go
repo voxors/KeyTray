@@ -28,7 +28,12 @@ func main() {
 	if err != nil {
 		slog.Error("Failed to create tray icon", "error", err)
 	}
-	defer keytray.Close()
+	defer func(keytray tray.Keytray) {
+		err := keytray.Close()
+		if err != nil {
+			slog.Error("Failed to close tray icon", "error", err)
+		}
+	}(keytray)
 
 	devices := device.GetAvailableDevices()
 	validDevices := make([]device.Device, 0)
@@ -42,7 +47,10 @@ func main() {
 		}
 	}
 
-	keytray.SetDevices(devices)
+	err = keytray.SetDevices(devices)
+	if err != nil {
+		slog.Error("Failed to set devices in tray icon", "error", err)
+	}
 	keytray.StartDeviceWatcher(context.Background())
 	tempPercentageSpam := 0
 	for {

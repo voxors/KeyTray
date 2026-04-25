@@ -22,7 +22,7 @@ func GetAvailableDevices() []Device {
 	// and maybe having two Keychron M3 instance fighting over the same device.
 	// so, we at least ensure that we don't create multiple instance of the Keychron M3
 	keychronM3MouseFound := false
-	hid.Enumerate(hid.VendorIDAny, hid.ProductIDAny, func(info *hid.DeviceInfo) error {
+	err := hid.Enumerate(hid.VendorIDAny, hid.ProductIDAny, func(info *hid.DeviceInfo) error {
 		if keychronM3.CheckHidInfoValid(info) {
 			maybeKeychronM3Driver := keychronM3.NewKeychronM3Driver(info)
 			if maybeKeychronM3Driver.IsOk() && !keychronM3MouseFound {
@@ -41,6 +41,10 @@ func GetAvailableDevices() []Device {
 
 		return nil
 	})
+
+	if err != nil {
+		slog.Error("Failed to enumerate HID devices", "error", err)
+	}
 
 	return devices
 }

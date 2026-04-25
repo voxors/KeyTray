@@ -88,7 +88,7 @@ func (k *keychronM3Info) workerPercentageInteruptListener(ctx context.Context, p
 		}
 
 		var deviceInfo *hid.DeviceInfo
-		hid.Enumerate(VENDOR_ID, hid.ProductIDAny, func(info *hid.DeviceInfo) error {
+		err := hid.Enumerate(VENDOR_ID, hid.ProductIDAny, func(info *hid.DeviceInfo) error {
 			if deviceInfo == nil &&
 				CheckHidInfoValid(info) &&
 				info.ProductID == uint16(productID) {
@@ -96,6 +96,9 @@ func (k *keychronM3Info) workerPercentageInteruptListener(ctx context.Context, p
 			}
 			return nil
 		})
+		if err != nil {
+			slog.Error("Failed to enumerate devices", "error", err)
+		}
 
 		if deviceInfo == nil {
 			if !deviceNotFoundWarmed {
@@ -134,7 +137,10 @@ func (k *keychronM3Info) workerPercentageInteruptListener(ctx context.Context, p
 		connectionCtx, connCancel := context.WithCancel(ctx)
 		go func(device *hid.Device, context context.Context) {
 			<-context.Done()
-			device.Close()
+			err := device.Close()
+			if err != nil {
+				slog.Warn("Failed to close device", "Product ID", fmt.Sprintf("0x%x", productID))
+			}
 		}(device, connectionCtx)
 
 	ReadLoopLabel:
@@ -174,12 +180,15 @@ func (k *keychronM3Info) workerPercentageInteruptListener(ctx context.Context, p
 
 func (k *keychronM3Info) getPercentageThroughtFeatureReport(ctx context.Context) mo.Result[int] {
 	var deviceInfo *hid.DeviceInfo
-	hid.Enumerate(VENDOR_ID, hid.ProductIDAny, func(info *hid.DeviceInfo) error {
+	err := hid.Enumerate(VENDOR_ID, hid.ProductIDAny, func(info *hid.DeviceInfo) error {
 		if deviceInfo == nil && CheckHidInfoValid(info) {
 			deviceInfo = info
 		}
 		return nil
 	})
+	if err != nil {
+		return mo.Err[int](err)
+	}
 
 	if deviceInfo == nil {
 		return mo.Err[int](ErrDeviceNotFound)
@@ -201,7 +210,14 @@ func (k *keychronM3Info) getPercentageThroughtFeatureReport(ctx context.Context)
 	if err != nil {
 		return mo.Err[int](err)
 	}
-	defer device.Close()
+	defer func(device *hid.Device) {
+		if device != nil {
+			err := device.Close()
+			if err != nil {
+				slog.Warn("Failed to close device", "device", device)
+			}
+		}
+	}(device)
 
 	buffer := make([]byte, 64)
 

@@ -3,6 +3,7 @@ package tray
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"deedles.dev/tray"
 	"github.com/samber/mo"
@@ -40,30 +41,42 @@ func (k *Keytray) StartDeviceWatcher(ctx context.Context) {
 					d.Driver.UnsubscribeBatteryPercentage(updates)
 					return
 				case percentage := <-updates:
-					k.updateTray(d, percentage)
+					err := k.updateTray(d, percentage)
+					if err != nil {
+						slog.Warn("Failed to update tray")
+					}
 				}
 			}
 		}(dev, updates)
 	}
 }
 
-func (k *Keytray) updateTray(dev device.Device, percentage int) {
+func (k *Keytray) updateTray(dev device.Device, percentage int) error {
 	title := fmt.Sprintf("%s: %d%%", dev.DeviceName, percentage)
 	iconNamePercentage := (percentage % 10) * 10
-	k.item.SetProps(
+	err := k.item.SetProps(
 		tray.ItemToolTip("", nil, "Keytray", title),
 		tray.ItemIconName(fmt.Sprintf("battery-%03d", iconNamePercentage)),
 	)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
-func (k *Keytray) SetDevices(devices []device.Device) {
+func (k *Keytray) SetDevices(devices []device.Device) error {
 	k.devices = devices
 	for _, dev := range k.devices {
 		percentage := dev.Driver.BatteryPercentage()
 		if percentage.IsPresent() {
-			k.updateTray(dev, percentage.MustGet())
+			err := k.updateTray(dev, percentage.MustGet())
+			if err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 func (k *Keytray) Close() error {
