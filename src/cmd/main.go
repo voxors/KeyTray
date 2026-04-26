@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"log/slog"
 	"os"
 	"time"
@@ -10,6 +11,9 @@ import (
 	"github.com/voxors/KeyTray/src/pkg/driver/device"
 	"github.com/voxors/KeyTray/src/pkg/tray"
 )
+
+//go:embed "assets/keytray.svg"
+var logoSvg string
 
 func setupLogger() {
 	w := os.Stderr
@@ -34,6 +38,11 @@ func main() {
 			slog.Error("Failed to close tray icon", "error", err)
 		}
 	}(keytray)
+
+	err = keytray.SetLogo(logoSvg)
+	if err != nil {
+		slog.Error("Failed to set icon for tray", "error", err)
+	}
 
 	devices := device.GetAvailableDevices()
 	validDevices := make([]device.Device, 0)
