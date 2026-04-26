@@ -82,7 +82,7 @@ func (k *Keytray) updateTray() error {
 
 	var iconName string
 	if lowestPercentage.IsSome() {
-		iconNamePercentage := (lowestPercentage.MustGet() % 10) * 10
+		iconNamePercentage := (lowestPercentage.MustGet() / 10) * 10
 		iconName = fmt.Sprintf("battery-%03d", iconNamePercentage)
 	} else {
 		if k.logo.IsSome() {
