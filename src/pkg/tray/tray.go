@@ -19,9 +19,9 @@ const (
 )
 
 type Keytray struct {
-	item    *tray.Item
-	devices []device.Device
-	logo    mo.Option[*image.RGBA]
+	item   *tray.Item
+	driver []device.Driver
+	logo   mo.Option[*image.RGBA]
 }
 
 func Init() mo.Result[Keytray] {
@@ -34,22 +34,22 @@ func Init() mo.Result[Keytray] {
 	}
 
 	keytray := Keytray{
-		item:    item,
-		devices: []device.Device{},
-		logo:    mo.None[*image.RGBA](),
+		item:   item,
+		driver: []device.Driver{},
+		logo:   mo.None[*image.RGBA](),
 	}
 
 	return mo.Ok(keytray)
 }
 
 func (k *Keytray) StartDeviceWatcher(ctx context.Context) {
-	for _, dev := range k.devices {
-		updates := dev.Driver.SubscribeBatteryPercentage()
-		go func(d device.Device, updates chan int) {
+	for _, driver := range k.driver {
+		updates := driver.SubscribeBatteryPercentage()
+		go func(d device.Driver, updates chan int) {
 			for {
 				select {
 				case <-ctx.Done():
-					d.Driver.UnsubscribeBatteryPercentage(updates)
+					d.UnsubscribeBatteryPercentage(updates)
 					return
 				case <-updates:
 					err := k.updateTray()
@@ -58,25 +58,24 @@ func (k *Keytray) StartDeviceWatcher(ctx context.Context) {
 					}
 				}
 			}
-		}(dev, updates)
+		}(driver, updates)
 	}
 }
 
 func (k *Keytray) updateTray() error {
 	var tooltipTexts []string
 	lowestPercentage := mo.None[int]()
-	for _, dev := range k.devices {
-		percentage, exist := dev.Driver.BatteryPercentage().Get()
+	for _, driver := range k.driver {
+		percentage, exist := driver.BatteryPercentage().Get()
 		if exist {
-			tooltipTexts = append(tooltipTexts, fmt.Sprintf("%s: %d%%", dev.DeviceName, percentage))
+			tooltipTexts = append(tooltipTexts, fmt.Sprintf("%s: %d%%", driver.GetDeviceName(), percentage))
+			if lowestPercentage.IsNone() {
+				lowestPercentage = mo.Some(percentage)
+			} else if percentage < lowestPercentage.MustGet() {
+				lowestPercentage = mo.Some(percentage)
+			}
 		} else {
-			tooltipTexts = append(tooltipTexts, fmt.Sprintf("%s: %s", dev.DeviceName, "Unavailable"))
-		}
-
-		if lowestPercentage.IsNone() {
-			lowestPercentage = mo.Some(percentage)
-		} else if percentage < lowestPercentage.MustGet() {
-			lowestPercentage = mo.Some(percentage)
+			tooltipTexts = append(tooltipTexts, fmt.Sprintf("%s: %s", driver.GetDeviceName(), "Unavailable"))
 		}
 	}
 
@@ -105,8 +104,8 @@ func (k *Keytray) updateTray() error {
 	return nil
 }
 
-func (k *Keytray) SetDevices(devices []device.Device) error {
-	k.devices = devices
+func (k *Keytray) SetDevices(devices []device.Driver) error {
+	k.driver = devices
 	err := k.updateTray()
 	if err != nil {
 		return err
@@ -137,7 +136,7 @@ func (k *Keytray) SetLogo(svgContent string) error {
 
 	k.logo = mo.Some(image)
 
-	return nil
+	return k.updateTray()
 }
 
 func (k *Keytray) Close() error {

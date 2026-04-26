@@ -44,41 +44,13 @@ func main() {
 		slog.Error("Failed to set icon for tray", "error", err)
 	}
 
-	devices := device.GetAvailableDevices()
-	validDevices := make([]device.Device, 0)
-	for _, device := range devices {
-		err := device.Driver.Init(context.Background())
+	deviceWatcher := device.NewDeviceWatcher()
+	devicesChan := deviceWatcher.StartDeviceMonitor(context.Background())
+
+	for devices := range devicesChan {
+		err := keytray.SetDevices(devices)
 		if err != nil {
-			slog.Error("Failed to init driver", "device", device, "err", err)
-		} else {
-			device.Driver.StartBackgroundCheck(context.Background())
-			validDevices = append(validDevices, device)
+			slog.Error("Failed to set devices for tray", "error", err)
 		}
-	}
-
-	err = keytray.SetDevices(devices)
-	if err != nil {
-		slog.Error("Failed to set devices in tray icon", "error", err)
-	}
-	keytray.StartDeviceWatcher(context.Background())
-	tempPercentageSpam := 0
-	for {
-		for _, device := range validDevices {
-			percentage, presence := device.Driver.BatteryPercentage().Get()
-			if !presence {
-				slog.Debug("Percentage do not exist")
-				continue
-			}
-
-			if tempPercentageSpam != percentage {
-				tempPercentageSpam = percentage
-
-				slog.Info(
-					"Battery update",
-					"device", device.DeviceName,
-					"percentage", percentage)
-			}
-		}
-		time.Sleep(1 * time.Second)
 	}
 }

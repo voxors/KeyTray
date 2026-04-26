@@ -29,9 +29,10 @@ type keychronM3Info struct {
 }
 
 var (
-	ErrInvalidDevice  = errors.New("invalid device")
-	ErrDataNotFound   = errors.New("data not found")
-	ErrDeviceNotFound = errors.New("device not found")
+	ErrInvalidDevice   = errors.New("invalid device")
+	ErrDataNotFound    = errors.New("data not found")
+	ErrDeviceNotFound  = errors.New("device not found")
+	ErrInvalidResponse = errors.New("invalid response")
 )
 
 func CheckHidInfoValid(hidDevice *hid.DeviceInfo) bool {
@@ -222,41 +223,63 @@ func (k *keychronM3Info) getPercentageThroughtFeatureReport(ctx context.Context)
 	buffer := make([]byte, 64)
 
 	var lasterr error
-	var retries int
-	for retries = range 5 {
+	const maxRetries = 6
+	for range maxRetries {
 		select {
 		case <-ctx.Done():
 			return mo.Err[int](ctx.Err())
 		default:
 		}
 
-		buffer[0] = 0x51
-		readlen, err := device.GetFeatureReport(buffer)
-		slog.Debug(
-			"Keychron M3 Mouse buffer",
-			"productID", fmt.Sprintf("%x", deviceInfo.ProductID),
-			"buffer", fmt.Sprintf("% x", buffer),
-		)
+		err = k.getfeatureReport(buffer, device, deviceInfo)
 		if err != nil {
 			lasterr = err
-			continue
+			select {
+			case <-ctx.Done():
+				return mo.Err[int](ctx.Err())
+			default:
+				time.Sleep(1 * time.Second)
+				continue
+			}
 		}
 
-		if readlen < 12 {
-			lasterr = ErrDataNotFound
-			continue
+		percentage := int(buffer[11])
+		k.setCurrentPercentage(percentage)
+		return mo.Ok(percentage)
+	}
+
+	return mo.Err[int](lasterr)
+}
+
+func (*keychronM3Info) getfeatureReport(buffer []byte, device *hid.Device, deviceInfo *hid.DeviceInfo) error {
+	buffer[0] = 0x51
+	readlen, err := device.GetFeatureReport(buffer)
+	slog.Debug(
+		"Keychron M3 Mouse buffer",
+		"productID", fmt.Sprintf("%x", deviceInfo.ProductID),
+		"buffer", fmt.Sprintf("% x", buffer),
+	)
+	if err != nil {
+		return err
+	}
+
+	isAllZero := true
+	for _, byte := range buffer[1:] {
+		if byte != 0 {
+			isAllZero = false
+			break
 		}
-
-		break
 	}
 
-	if retries >= 5 {
-		return mo.Err[int](lasterr)
+	if isAllZero {
+		return ErrInvalidResponse
 	}
 
-	percentage := int(buffer[11])
-	k.setCurrentPercentage(percentage)
-	return mo.Ok(percentage)
+	if readlen < 12 {
+		return ErrDataNotFound
+	}
+
+	return nil
 }
 
 func (k *keychronM3Info) Init(ctx context.Context) error {
@@ -274,4 +297,16 @@ func (k *keychronM3Info) SubscribeBatteryPercentage() chan int {
 
 func (k *keychronM3Info) UnsubscribeBatteryPercentage(channel chan int) {
 	k.batteryBroadcast.RemoveListener(channel)
+}
+
+func (k *keychronM3Info) GetProductID() []int {
+	return []int{PRODUCT_ID_DEVICE, PRODUCT_ID_DONGLE}
+}
+
+func (k *keychronM3Info) GetVendorID() []int {
+	return []int{VENDOR_ID}
+}
+
+func (k *keychronM3Info) GetDeviceName() string {
+	return "Keychron M3"
 }
