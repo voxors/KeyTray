@@ -26,6 +26,9 @@ type keychronM3Info struct {
 	batteryPercentage      mo.Option[int]
 	batteryPercentageMutex sync.RWMutex
 	batteryBroadcast       broadcast.Broadcast[int]
+	isCharging             mo.Option[bool]
+	isChargingMutex        sync.RWMutex
+	isChargingBroadcast    broadcast.Broadcast[bool]
 	cancelContext          mo.Option[context.CancelFunc]
 }
 
@@ -59,6 +62,9 @@ func NewKeychronM3Driver(hidDevice *hid.DeviceInfo) mo.Result[*keychronM3Info] {
 		batteryPercentage:      mo.None[int](),
 		batteryPercentageMutex: sync.RWMutex{},
 		batteryBroadcast:       broadcast.NewBroadcast[int](),
+		isCharging:             mo.Option[bool]{},
+		isChargingMutex:        sync.RWMutex{},
+		isChargingBroadcast:    broadcast.NewBroadcast[bool](),
 		cancelContext:          mo.None[context.CancelFunc](),
 	})
 }
@@ -74,6 +80,19 @@ func (k *keychronM3Info) getCurrentPercentage() mo.Option[int] {
 	k.batteryPercentageMutex.RLock()
 	defer k.batteryPercentageMutex.RUnlock()
 	return k.batteryPercentage
+}
+
+func (k *keychronM3Info) getIsCharging() mo.Option[bool] {
+	k.isChargingMutex.Lock()
+	defer k.isChargingMutex.Unlock()
+	return k.isCharging
+}
+
+func (k *keychronM3Info) setIsCharging(isCharging bool) {
+	k.isChargingMutex.Lock()
+	defer k.isChargingMutex.Unlock()
+	k.isCharging = mo.Some(isCharging)
+	k.isChargingBroadcast.Send(isCharging)
 }
 
 func (k *keychronM3Info) StartBackgroundCheck(ctx context.Context) {
@@ -181,6 +200,7 @@ func (k *keychronM3Info) workerPercentageInteruptListener(ctx context.Context, p
 
 				if buffer[1] == 0xE2 {
 					k.setCurrentPercentage(int(buffer[5]))
+					k.setIsCharging(buffer[4] != 0)
 				}
 			}
 		}
@@ -257,7 +277,9 @@ func (k *keychronM3Info) getPercentageThroughtFeatureReport(ctx context.Context)
 		}
 
 		percentage := int(buffer[11])
+		powerState := int(3 & buffer[12])
 		k.setCurrentPercentage(percentage)
+		k.setIsCharging(powerState != 0)
 		return mo.Ok(percentage)
 	}
 
@@ -304,12 +326,24 @@ func (k *keychronM3Info) BatteryPercentage() mo.Option[int] {
 	return k.getCurrentPercentage()
 }
 
+func (k *keychronM3Info) GetIsCharging() mo.Option[bool] {
+	return k.getIsCharging()
+}
+
 func (k *keychronM3Info) SubscribeBatteryPercentage() chan int {
 	return k.batteryBroadcast.AddListener()
 }
 
 func (k *keychronM3Info) UnsubscribeBatteryPercentage(channel chan int) {
 	k.batteryBroadcast.RemoveListener(channel)
+}
+
+func (k *keychronM3Info) SubscribeIsCharging() chan bool {
+	return k.isChargingBroadcast.AddListener()
+}
+
+func (k *keychronM3Info) UnsubscribeIsChargin(channel chan bool) {
+	k.isChargingBroadcast.RemoveListener(channel)
 }
 
 func (k *keychronM3Info) GetProductID() []int {

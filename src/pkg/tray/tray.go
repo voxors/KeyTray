@@ -44,36 +44,51 @@ func Init() mo.Result[Keytray] {
 
 func (k *Keytray) StartDeviceWatcher(ctx context.Context) {
 	for _, driver := range k.driver {
-		updates := driver.SubscribeBatteryPercentage()
-		go func(d device.Driver, updates chan int) {
+		batteryUpdatesChan := driver.SubscribeBatteryPercentage()
+		isChargingUpdatesChan := driver.SubscribeIsCharging()
+		go func(d device.Driver, batteryUpdateChan chan int, isChargingUpdateChan chan bool) {
 			for {
 				select {
 				case <-ctx.Done():
-					d.UnsubscribeBatteryPercentage(updates)
+					d.UnsubscribeBatteryPercentage(batteryUpdateChan)
 					return
-				case <-updates:
+				case <-batteryUpdateChan:
 					err := k.updateTray()
 					if err != nil {
-						slog.Warn("Failed to update tray")
+						slog.Warn("Failed to update tray", "error", err)
+					}
+				case <-isChargingUpdateChan:
+					err := k.updateTray()
+					if err != nil {
+						slog.Warn("Failed to update tray", "error", err)
 					}
 				}
 			}
-		}(driver, updates)
+		}(driver, batteryUpdatesChan, isChargingUpdatesChan)
 	}
 }
 
 func (k *Keytray) updateTray() error {
 	var tooltipTexts []string
 	lowestPercentage := mo.None[int]()
+	lowestIsCharging := mo.None[bool]()
 	for _, driver := range k.driver {
 		percentage, exist := driver.BatteryPercentage().Get()
 		if exist {
-			tooltipTexts = append(tooltipTexts, fmt.Sprintf("%s: %d%%", driver.GetDeviceName(), percentage))
+			tooltipText := fmt.Sprintf("%s: %d%%", driver.GetDeviceName(), percentage)
+			isCharging, isChargingExist := driver.GetIsCharging().Get()
 			if lowestPercentage.IsNone() {
 				lowestPercentage = mo.Some(percentage)
+				if isChargingExist {
+					lowestIsCharging = mo.Some(isCharging)
+				}
 			} else if percentage < lowestPercentage.MustGet() {
 				lowestPercentage = mo.Some(percentage)
+				if isChargingExist {
+					lowestIsCharging = mo.Some(isCharging)
+				}
 			}
+			tooltipTexts = append(tooltipTexts, tooltipText)
 		} else {
 			tooltipTexts = append(tooltipTexts, fmt.Sprintf("%s: %s", driver.GetDeviceName(), "Unavailable"))
 		}
@@ -83,6 +98,9 @@ func (k *Keytray) updateTray() error {
 	if lowestPercentage.IsSome() {
 		iconNamePercentage := (lowestPercentage.MustGet() / 10) * 10
 		iconName = fmt.Sprintf("battery-%03d", iconNamePercentage)
+		if lowestIsCharging.IsSome() && lowestIsCharging.MustGet() {
+			iconName = fmt.Sprintf("%s%s", iconName, "-charging")
+		}
 	} else {
 		if k.logo.IsSome() {
 			err := k.item.SetProps(
