@@ -19,9 +19,10 @@ const (
 )
 
 type Keytray struct {
-	item   *tray.Item
-	driver []device.Driver
-	logo   mo.Option[*image.RGBA]
+	item              *tray.Item
+	driver            []device.Driver
+	logo              mo.Option[*image.RGBA]
+	watcherCancelFunc mo.Option[context.CancelFunc]
 }
 
 func Init() mo.Result[Keytray] {
@@ -35,23 +36,30 @@ func Init() mo.Result[Keytray] {
 	}
 
 	keytray := Keytray{
-		item:   item,
-		driver: []device.Driver{},
-		logo:   mo.None[*image.RGBA](),
+		item:              item,
+		driver:            []device.Driver{},
+		logo:              mo.None[*image.RGBA](),
+		watcherCancelFunc: mo.None[context.CancelFunc](),
 	}
 
 	return mo.Ok(keytray)
 }
 
 func (k *Keytray) StartDeviceWatcher(ctx context.Context) {
+	if k.watcherCancelFunc.IsSome() {
+		k.watcherCancelFunc.MustGet()()
+	}
+	watcherCtx, watcherCancelFunc := context.WithCancel(ctx)
+	k.watcherCancelFunc = mo.Some(watcherCancelFunc)
 	for _, driver := range k.driver {
 		batteryUpdatesChan := driver.SubscribeBatteryPercentage()
 		isChargingUpdatesChan := driver.SubscribeIsCharging()
 		go func(d device.Driver, batteryUpdateChan chan int, isChargingUpdateChan chan bool) {
 			for {
 				select {
-				case <-ctx.Done():
+				case <-watcherCtx.Done():
 					d.UnsubscribeBatteryPercentage(batteryUpdateChan)
+					d.UnsubscribeIsChargin(isChargingUpdatesChan)
 					return
 				case <-batteryUpdateChan:
 					err := k.updateTray()
@@ -123,12 +131,13 @@ func (k *Keytray) updateTray() error {
 	return nil
 }
 
-func (k *Keytray) SetDevices(devices []device.Driver) error {
+func (k *Keytray) SetDevices(ctx context.Context, devices []device.Driver) error {
 	k.driver = devices
 	err := k.updateTray()
 	if err != nil {
 		return err
 	}
+	k.StartDeviceWatcher(ctx)
 	return nil
 }
 

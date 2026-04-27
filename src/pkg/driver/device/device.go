@@ -51,7 +51,10 @@ func (dw *DeviceWatcher) StartDeviceMonitor(ctx context.Context) <-chan []Driver
 				close(ch)
 				return
 			case <-ticker.C:
-				ch <- dw.updateDriverList(ctx)
+				drivers, changed := dw.updateDriverList(ctx)
+				if changed {
+					ch <- drivers
+				}
 			}
 		}
 	}()
@@ -59,8 +62,16 @@ func (dw *DeviceWatcher) StartDeviceMonitor(ctx context.Context) <-chan []Driver
 	return ch
 }
 
-func (dw *DeviceWatcher) updateDriverList(ctx context.Context) []Driver {
+func (dw *DeviceWatcher) Cleanup() {
+	for _, device := range dw.drivers {
+		device.StopBackgroundCheck()
+	}
+	dw.drivers = make([]Driver, 0)
+}
+
+func (dw *DeviceWatcher) updateDriverList(ctx context.Context) ([]Driver, bool) {
 	drivers := make([]Driver, 0)
+	changed := false
 	hidDevicesList := dw.GetAvailableDevices()
 	for _, hidDevice := range hidDevicesList {
 		isDriverRunning := false
@@ -94,6 +105,7 @@ func (dw *DeviceWatcher) updateDriverList(ctx context.Context) []Driver {
 					drivers = append(drivers, maybeKeychronM3Driver.MustGet())
 				}
 			}
+			changed = true
 		}
 	}
 
@@ -107,10 +119,11 @@ driverLoop:
 			}
 		}
 
+		changed = true
 		slog.Info("Stopping driver", "name", driver.GetDeviceName())
 		driver.StopBackgroundCheck()
 	}
 
 	dw.drivers = drivers
-	return drivers
+	return drivers, changed
 }

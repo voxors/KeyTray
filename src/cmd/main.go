@@ -50,13 +50,14 @@ func main() {
 	}
 
 	deviceWatcher := device.NewDeviceWatcher()
-	devicesChan := deviceWatcher.StartDeviceMonitor(context.Background())
+	ctxWithCancel, cancelMain := context.WithCancel(context.Background())
+	devicesChan := deviceWatcher.StartDeviceMonitor(ctxWithCancel)
 
 waitingLoop:
 	for {
 		select {
 		case devices := <-devicesChan:
-			err := keytray.SetDevices(devices)
+			err := keytray.SetDevices(ctxWithCancel, devices)
 			if err != nil {
 				slog.Error("Failed to set devices for tray", "error", err)
 			}
@@ -64,6 +65,9 @@ waitingLoop:
 			break waitingLoop
 		}
 	}
+
+	cancelMain()
+	deviceWatcher.Cleanup()
 
 	slog.Info("KeyTray is shutting down")
 }
