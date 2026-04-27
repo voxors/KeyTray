@@ -28,6 +28,7 @@ func Init() mo.Result[Keytray] {
 	item, err := tray.New(
 		tray.ItemID("Keytray"),
 		tray.ItemTitle("Keytray"),
+		tray.ItemIsMenu(true),
 	)
 	if err != nil {
 		return mo.Err[Keytray](err)
@@ -155,6 +156,28 @@ func (k *Keytray) SetLogo(svgContent string) error {
 	k.logo = mo.Some(image)
 
 	return k.updateTray()
+}
+
+func (k *Keytray) AddQuit() mo.Result[<-chan struct{}] {
+	ch := make(chan struct{}, 1)
+	_, err := k.item.Menu().AddChild(
+		tray.MenuItemLabel("Quit"),
+		tray.MenuItemShortcut([][]string{{"Q"}}),
+		tray.MenuItemIconName("application-exit"),
+		tray.MenuItemHandler(func(eventID tray.MenuEventID, data any, timestamp uint32) error {
+			slog.Info("Quit activated in tray", "EventID", eventID)
+			select {
+			case ch <- struct{}{}:
+			default:
+			}
+			return nil
+		}),
+	)
+	if err != nil {
+		return mo.Err[<-chan struct{}](err)
+	}
+
+	return mo.Ok((<-chan struct{})(ch))
 }
 
 func (k *Keytray) Close() error {

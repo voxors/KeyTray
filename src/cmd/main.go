@@ -44,13 +44,26 @@ func main() {
 		slog.Error("Failed to set icon for tray", "error", err)
 	}
 
+	quitChan, err := keytray.AddQuit().Get()
+	if err != nil {
+		slog.Error("Failed to add quit menu to tray", "error", err)
+	}
+
 	deviceWatcher := device.NewDeviceWatcher()
 	devicesChan := deviceWatcher.StartDeviceMonitor(context.Background())
 
-	for devices := range devicesChan {
-		err := keytray.SetDevices(devices)
-		if err != nil {
-			slog.Error("Failed to set devices for tray", "error", err)
+waitingLoop:
+	for {
+		select {
+		case devices := <-devicesChan:
+			err := keytray.SetDevices(devices)
+			if err != nil {
+				slog.Error("Failed to set devices for tray", "error", err)
+			}
+		case <-quitChan:
+			break waitingLoop
 		}
 	}
+
+	slog.Info("KeyTray is shutting down")
 }

@@ -107,6 +107,7 @@ driverLoop:
 			}
 		}
 
+		slog.Info("Stopping driver", "name", driver.GetDeviceName())
 		driver.StopBackgroundCheck()
 	}
 
