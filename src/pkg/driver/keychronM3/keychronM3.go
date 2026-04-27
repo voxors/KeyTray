@@ -26,6 +26,7 @@ type keychronM3Info struct {
 	batteryPercentage      mo.Option[int]
 	batteryPercentageMutex sync.RWMutex
 	batteryBroadcast       broadcast.Broadcast[int]
+	cancelContext          mo.Option[context.CancelFunc]
 }
 
 var (
@@ -58,6 +59,7 @@ func NewKeychronM3Driver(hidDevice *hid.DeviceInfo) mo.Result[*keychronM3Info] {
 		batteryPercentage:      mo.None[int](),
 		batteryPercentageMutex: sync.RWMutex{},
 		batteryBroadcast:       broadcast.NewBroadcast[int](),
+		cancelContext:          mo.None[context.CancelFunc](),
 	})
 }
 
@@ -75,8 +77,19 @@ func (k *keychronM3Info) getCurrentPercentage() mo.Option[int] {
 }
 
 func (k *keychronM3Info) StartBackgroundCheck(ctx context.Context) {
-	go k.workerPercentageInteruptListener(ctx, PRODUCT_ID_DEVICE)
-	go k.workerPercentageInteruptListener(ctx, PRODUCT_ID_DONGLE)
+	if k.cancelContext.IsSome() {
+		k.cancelContext.MustGet()()
+	}
+	cancelctx, cancel := context.WithCancel(ctx)
+	k.cancelContext = mo.Some(cancel)
+	go k.workerPercentageInteruptListener(cancelctx, PRODUCT_ID_DEVICE)
+	go k.workerPercentageInteruptListener(cancelctx, PRODUCT_ID_DONGLE)
+}
+
+func (k *keychronM3Info) StopBackgroundCheck() {
+	if k.cancelContext.IsSome() {
+		k.cancelContext.MustGet()()
+	}
 }
 
 func (k *keychronM3Info) workerPercentageInteruptListener(ctx context.Context, productID int) {

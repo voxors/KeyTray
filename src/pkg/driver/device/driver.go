@@ -12,6 +12,7 @@ type Driver interface {
 	UnsubscribeBatteryPercentage(chan int)
 	Init(ctx context.Context) error
 	StartBackgroundCheck(ctx context.Context)
+	StopBackgroundCheck()
 	GetProductID() []int
 	GetVendorID() []int
 	GetDeviceName() string

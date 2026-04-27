@@ -106,6 +106,8 @@ driverLoop:
 				continue driverLoop
 			}
 		}
+
+		driver.StopBackgroundCheck()
 	}
 
 	dw.drivers = drivers
