@@ -1,6 +1,9 @@
 version: 2
 
 project_name: KeyTray
+before:
+  hooks:
+    - bash -c "sed 's/\{\{VERSION\}\}/{{ .Version }}/g' keytray.desktop.tmpl > keytray.desktop"
 builds:
   - main: ./src/cmd/
     goos:
@@ -15,7 +18,15 @@ nfpms:
     homepage: https://github.com/voxors/KeyTray
     maintainer: Jonathan Croteau-Dicaire<jonathan.croteau.dicaire@gmail.com>
     description: Tray application to show battery level of Keychron devices
+    vendor: Jonathan Croteau-Dicaire
     license: MIT
+    contents:
+      - src: keytray.desktop
+        dst: /usr/share/applications/keytray.desktop
+      - src: src/cmd/assets/keytray.svg
+        dst: /usr/share/icons/hicolor/scalable/apps/keytray.svg
+    dependencies:
+      - libudev1
     formats:
       - deb
       - rpm
