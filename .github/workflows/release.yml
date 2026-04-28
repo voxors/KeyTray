@@ -13,23 +13,23 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
-
+          go-version-file: go.mod
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libudev-dev
-
-      - name: Build Binary
-        run: |
-          go build -o keytray ./src/cmd/
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
+      - name: Write GPG key
+        run: echo "${{ secrets.GPG_KEY }}" > gpg/key.asc
+      - uses: goreleaser/goreleaser-action@v7
         with:
-          files: keytray
-          generate_release_notes: true
+          version: ~> 2
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NFPM_DEFAULT_PASSPHRASE: ${{ secrets.NFPM_DEFAULT_PASSPHRASE }}

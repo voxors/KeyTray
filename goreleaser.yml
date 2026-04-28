@@ -1,0 +1,28 @@
+version: 2
+
+project_name: KeyTray
+builds:
+  - main: ./src/cmd/
+    goos:
+      - linux
+    goarch:
+      - amd64
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+nfpms:
+  - package_name: KeyTray
+    homepage: https://github.com/voxors/KeyTray
+    maintainer: Jonathan Croteau-Dicaire<jonathan.croteau.dicaire@gmail.com>
+    description: Tray application to show battery level of Keychron devices
+    license: MIT
+    formats:
+      - deb
+      - rpm
+      - archlinux
+    rpm:
+      signature:
+        key_file: '{{ envOrDefault "GPG_KEY_PATH" "gpg/key.asc" }}'
+    deb:
+      signature:
+        key_file: '{{ envOrDefault "GPG_KEY_PATH" "gpg/key.asc" }}'
