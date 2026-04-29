@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"log/slog"
+	"slices"
 	"strings"
 
 	"deedles.dev/tray"
@@ -23,6 +24,9 @@ type Keytray struct {
 	driver            []device.Driver
 	logo              mo.Option[*image.RGBA]
 	watcherCancelFunc mo.Option[context.CancelFunc]
+	quitItem          mo.Option[*tray.MenuItem]
+	separatorItem     mo.Option[*tray.MenuItem]
+	batteryItems      map[device.Driver]*tray.MenuItem
 }
 
 func Init() mo.Result[Keytray] {
@@ -40,6 +44,9 @@ func Init() mo.Result[Keytray] {
 		driver:            []device.Driver{},
 		logo:              mo.None[*image.RGBA](),
 		watcherCancelFunc: mo.None[context.CancelFunc](),
+		quitItem:          mo.None[*tray.MenuItem](),
+		separatorItem:     mo.None[*tray.MenuItem](),
+		batteryItems:      make(map[device.Driver]*tray.MenuItem),
 	}
 
 	return mo.Ok(keytray)
@@ -82,10 +89,10 @@ func (k *Keytray) updateTray() error {
 	lowestPercentage := mo.None[int]()
 	lowestIsCharging := mo.None[bool]()
 	for _, driver := range k.driver {
-		percentage, exist := driver.BatteryPercentage().Get()
-		if exist {
+		percentage, percentageExist := driver.BatteryPercentage().Get()
+		isCharging, isChargingExist := driver.GetIsCharging().Get()
+		if percentageExist {
 			tooltipText := fmt.Sprintf("%s: %d%%", driver.GetDeviceName(), percentage)
-			isCharging, isChargingExist := driver.GetIsCharging().Get()
 			if lowestPercentage.IsNone() {
 				lowestPercentage = mo.Some(percentage)
 				if isChargingExist {
@@ -101,6 +108,73 @@ func (k *Keytray) updateTray() error {
 		} else {
 			tooltipTexts = append(tooltipTexts, fmt.Sprintf("%s: %s", driver.GetDeviceName(), "Unavailable"))
 		}
+
+		var iconName string
+		tooltipText := tooltipTexts[len(tooltipTexts)-1]
+		if percentageExist {
+			iconNamePercentage := (percentage / 10) * 10
+			iconName = fmt.Sprintf("battery-%03d", iconNamePercentage)
+			if isChargingExist && isCharging {
+				iconName = fmt.Sprintf("%s%s", iconName, "-charging")
+			}
+		}
+		if batteryMenuItem, ok := k.batteryItems[driver]; ok {
+			err := batteryMenuItem.SetProps(
+				tray.MenuItemLabel(tooltipText),
+				tray.MenuItemIconName(iconName),
+			)
+			if err != nil {
+				return err
+			}
+		} else {
+			batteryMenuItem, err := k.item.Menu().AddChild(
+				tray.MenuItemLabel(tooltipText),
+				tray.MenuItemIconName(iconName),
+			)
+			if err != nil {
+				return err
+			}
+			k.batteryItems[driver] = batteryMenuItem
+		}
+	}
+
+	newBatteryMenuItemsMap := make(map[device.Driver]*tray.MenuItem)
+	for driver, batteryMenuItem := range k.batteryItems {
+		if slices.Contains(k.driver, driver) {
+			newBatteryMenuItemsMap[driver] = batteryMenuItem
+		} else {
+			err := batteryMenuItem.Remove()
+			if err != nil {
+				return err
+			}
+		}
+	}
+	k.batteryItems = newBatteryMenuItemsMap
+
+	if k.quitItem.IsSome() && len(k.batteryItems) != 0 {
+		if k.separatorItem.IsNone() {
+			separatorItem, err := k.item.Menu().AddChild(
+				tray.MenuItemType(tray.Separator),
+			)
+			if err != nil {
+				return err
+			}
+			k.separatorItem = mo.Some(separatorItem)
+		}
+		err := k.item.Menu().AppendChild(k.separatorItem.MustGet())
+		if err != nil {
+			return err
+		}
+		err = k.item.Menu().AppendChild(k.quitItem.MustGet())
+		if err != nil {
+			return err
+		}
+	} else if k.separatorItem.IsSome() {
+		err := k.separatorItem.MustGet().Remove()
+		if err != nil {
+			return err
+		}
+		k.separatorItem = mo.None[*tray.MenuItem]()
 	}
 
 	var iconName string
@@ -169,7 +243,7 @@ func (k *Keytray) SetLogo(svgContent string) error {
 
 func (k *Keytray) AddQuit() mo.Result[<-chan struct{}] {
 	ch := make(chan struct{}, 1)
-	_, err := k.item.Menu().AddChild(
+	group, err := k.item.Menu().AddChild(
 		tray.MenuItemLabel("Quit"),
 		tray.MenuItemShortcut([][]string{{"Q"}}),
 		tray.MenuItemIconName("application-exit"),
@@ -185,6 +259,8 @@ func (k *Keytray) AddQuit() mo.Result[<-chan struct{}] {
 	if err != nil {
 		return mo.Err[<-chan struct{}](err)
 	}
+
+	k.quitItem = mo.Some(group)
 
 	return mo.Ok((<-chan struct{})(ch))
 }
