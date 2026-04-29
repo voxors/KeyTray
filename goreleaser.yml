@@ -34,7 +34,7 @@ nfpms:
           - libudev1
       rpm:
         dependencies:
-          - pkgconfig(libudev)
+          - libudev.so.1
 
     rpm:
       signature:
