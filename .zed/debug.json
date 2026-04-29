@@ -10,6 +10,6 @@
     "mode": "debug",
     "program": "./src/cmd",
     "cwd": "${ZED_WORKTREE_ROOT}/build",
-    "output": "${ZED_WORKTREE_ROOT}/build/KeyTray",
+    "output": "${ZED_WORKTREE_ROOT}/build/keytray",
   },
 ]

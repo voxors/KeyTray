@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Version={{VERSION}}
+Version=1.1.2-SNAPSHOT-d3eaee5
 Name=KeyTray
 Comment=Tray application to show battery level of Keychron devices
 Exec=keytray

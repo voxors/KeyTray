@@ -47,17 +47,11 @@ sudo apt-get install -f  # Fix any missing dependencies
 sudo rpm -i KeyTray_1.1.0_linux_amd64.rpm
 ```
 
-### Arch Linux (`.pkg.tar.zst`)
-
-```bash
-sudo pacman -U KeyTray_1.1.0_linux_amd64.pkg.tar.zst
-```
-
 ### Generic Linux (`.tar.gz`)
 
 1. Extract the archive:
    ```bash
-   tar -xzf KeyTray_1.1.0_linux_amd64.tar.gz
+   tar -xzf KeyTray_linux_amd64.tar.gz
    ```
 2. Move the binary to your `$PATH`:
    ```bash

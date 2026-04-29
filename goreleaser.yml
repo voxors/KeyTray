@@ -6,6 +6,7 @@ before:
     - bash -c "sed 's/\{\{VERSION\}\}/{{ .Version }}/g' keytray.desktop.tmpl > keytray.desktop"
 builds:
   - main: ./src/cmd/
+    binary: keytray
     goos:
       - linux
     goarch:
@@ -14,7 +15,7 @@ archives:
   - formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
 nfpms:
-  - package_name: KeyTray
+  - package_name: keytray
     homepage: https://github.com/voxors/KeyTray
     maintainer: Jonathan Croteau-Dicaire<jonathan.croteau.dicaire@gmail.com>
     description: Tray application to show battery level of Keychron devices
