@@ -12,20 +12,20 @@ battery level from the HID device and `deedles.dev/tray` for a native tray icon.
 
 - **Real‑time battery status** – Updates the tray icon and tooltip as the
   battery percentage changes.
-- **Zero external dependencies** – Written in Go, with a single binary.
+- **Portable binary** – Written in Go, with a single binary.
 
 ---
 
 ## Prerequisites
 
+### For Building from Source
 - Go 1.26.2 or newer
 - `libudev` development headers
+  On Debian/Ubuntu, install with: `sudo apt install libudev-dev`
 
-On Debian/Ubuntu you can install the headers with:
+### For Running the Binary
+- `libudev.so.1` (usually provided by `libudev1` on Debian/Ubuntu or `systemd-libs` on Fedora)
 
-```bash
-sudo apt install libudev-dev
-```
 
 ---
 

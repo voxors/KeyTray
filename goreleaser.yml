@@ -25,12 +25,17 @@ nfpms:
         dst: /usr/share/applications/keytray.desktop
       - src: src/cmd/assets/keytray.svg
         dst: /usr/share/icons/hicolor/scalable/apps/keytray.svg
-    dependencies:
-      - libudev1
     formats:
       - deb
       - rpm
-      - archlinux
+    overrides:
+      deb:
+        dependencies:
+          - libudev1
+      rpm:
+        dependencies:
+          - pkgconfig(libudev)
+
     rpm:
       signature:
         key_file: '{{ envOrDefault "GPG_KEY_PATH" "gpg/private_key.asc" }}'
