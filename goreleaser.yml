@@ -33,7 +33,7 @@ nfpms:
       - archlinux
     rpm:
       signature:
-        key_file: '{{ envOrDefault "GPG_KEY_PATH" "gpg/key.asc" }}'
+        key_file: '{{ envOrDefault "GPG_KEY_PATH" "gpg/private_key.asc" }}'
     deb:
       signature:
-        key_file: '{{ envOrDefault "GPG_KEY_PATH" "gpg/key.asc" }}'
+        key_file: '{{ envOrDefault "GPG_KEY_PATH" "gpg/private_key.asc" }}'

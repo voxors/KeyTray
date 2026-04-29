@@ -31,16 +31,38 @@ sudo apt install libudev-dev
 
 ## Installation
 
+You can download the latest releases from the [GitHub Releases](https://github.com/voxors/KeyTray/releases) page.  
+You can download the public key of the `deb` and `rpm` package at [Public Key](https://github.com/voxors/KeyTray/blob/main/gpg/public_key.asc)
+
+### Debian/Ubuntu (`.deb`)
+
 ```bash
-git clone https://github.com/voxors/KeyTray.git
-cd KeyTray
-
-# Build the binary
-go build -o keytray ./src/cmd
-
-# (Optional) Move it to a location in your $PATH
-sudo mv keytray /usr/local/bin/
+sudo dpkg -i KeyTray_1.1.0_linux_amd64.deb
+sudo apt-get install -f  # Fix any missing dependencies
 ```
+
+### Fedora/RHEL/CentOS (`.rpm`)
+
+```bash
+sudo rpm -i KeyTray_1.1.0_linux_amd64.rpm
+```
+
+### Arch Linux (`.pkg.tar.zst`)
+
+```bash
+sudo pacman -U KeyTray_1.1.0_linux_amd64.pkg.tar.zst
+```
+
+### Generic Linux (`.tar.gz`)
+
+1. Extract the archive:
+   ```bash
+   tar -xzf KeyTray_1.1.0_linux_amd64.tar.gz
+   ```
+2. Move the binary to your `$PATH`:
+   ```bash
+   sudo mv keytray /usr/local/bin/
+   ```
 
 ---
 
@@ -55,9 +77,6 @@ keytray
 The icon in the system tray will show the current battery percentage.
 Hovering over the icon shows a tooltip with the exact value.
 Clicking the icon will activate the application (currently a placeholder).
-
----
-
 ## Development
 
 Feel free to file issues or pull requests.
