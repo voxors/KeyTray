@@ -76,7 +76,7 @@ keytray
 
 The icon in the system tray will show the current battery percentage.
 Hovering over the icon shows a tooltip with the exact value.
-Clicking the icon will activate the application (currently a placeholder).
+Clicking the icon will open a menu with the same values and a quit option.
 ## Development
 
 Feel free to file issues or pull requests.
