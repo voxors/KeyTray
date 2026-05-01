@@ -3,7 +3,7 @@
 ![KeyTray Logo](src/cmd/assets/keytray.svg)
 
 **KeyTray** is a lightweight Linux application that displays the battery percentage of a
-Keychron M3 mouse in your system tray. It uses the `go-hid` library to read the
+Keychron mouse in your system tray. It uses the `go-hid` library to read the
 battery level from the HID device and `deedles.dev/tray` for a native tray icon.
 
 ---
@@ -13,6 +13,9 @@ battery level from the HID device and `deedles.dev/tray` for a native tray icon.
 - **Real‑time battery status** – Updates the tray icon and tooltip as the
   battery percentage changes.
 - **Portable binary** – Written in Go, with a single binary.
+- **Supported devices**
+  - Keychron M3
+  - Keychron M6
 
 ---
 

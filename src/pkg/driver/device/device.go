@@ -9,6 +9,7 @@ import (
 
 	"github.com/sstallion/go-hid"
 	"github.com/voxors/KeyTray/src/pkg/driver/keychronM3"
+	"github.com/voxors/KeyTray/src/pkg/driver/keychronM6"
 )
 
 type DeviceWatcher struct {
@@ -26,6 +27,8 @@ func (dw *DeviceWatcher) GetAvailableDevices() []hid.DeviceInfo {
 	//Filter for device we support
 	err := hid.Enumerate(hid.VendorIDAny, hid.ProductIDAny, func(info *hid.DeviceInfo) error {
 		if keychronM3.CheckHidInfoValid(info) {
+			devices = append(devices, *info)
+		} else if keychronM6.CheckHidInfoValid(info) {
 			devices = append(devices, *info)
 		}
 		return nil
@@ -76,13 +79,13 @@ func (dw *DeviceWatcher) updateDriverList(ctx context.Context) ([]Driver, bool) 
 	for _, hidDevice := range hidDevicesList {
 		isDriverRunning := false
 		for _, driver := range dw.drivers {
-			if slices.Contains(driver.GetProductID(), int(hidDevice.ProductID)) ||
+			if slices.Contains(driver.GetProductID(), int(hidDevice.ProductID)) &&
 				slices.Contains(driver.GetVendorID(), int(hidDevice.VendorID)) {
 				isDriverRunning = true
 			}
 		}
 		for _, driver := range drivers {
-			if slices.Contains(driver.GetProductID(), int(hidDevice.ProductID)) ||
+			if slices.Contains(driver.GetProductID(), int(hidDevice.ProductID)) &&
 				slices.Contains(driver.GetVendorID(), int(hidDevice.VendorID)) {
 				isDriverRunning = true
 			}
@@ -103,16 +106,34 @@ func (dw *DeviceWatcher) updateDriverList(ctx context.Context) ([]Driver, bool) 
 					}
 					maybeKeychronM3Driver.MustGet().StartBackgroundCheck(ctx)
 					drivers = append(drivers, maybeKeychronM3Driver.MustGet())
+					changed = true
 				}
 			}
-			changed = true
+			if keychronM6.CheckHidInfoValid(&hidDevice) {
+				maybeKeychronM6Driver := keychronM6.NewKeychronM6Driver(&hidDevice)
+				if maybeKeychronM6Driver.IsOk() {
+					slog.Info(
+						"Keychron M6 mouse discovered",
+						"Vendor ID", fmt.Sprintf("0x%x", hidDevice.VendorID),
+						"Product ID", fmt.Sprintf("0x%x", hidDevice.ProductID),
+					)
+
+					err := maybeKeychronM6Driver.MustGet().Init(ctx)
+					if err != nil {
+						slog.Error("Failed to initialize Keychron M6 mouse driver", "error", err.Error())
+					}
+					maybeKeychronM6Driver.MustGet().StartBackgroundCheck(ctx)
+					drivers = append(drivers, maybeKeychronM6Driver.MustGet())
+					changed = true
+				}
+			}
 		}
 	}
 
 driverLoop:
 	for _, driver := range dw.drivers {
 		for _, hidDevice := range hidDevicesList {
-			if slices.Contains(driver.GetProductID(), int(hidDevice.ProductID)) ||
+			if slices.Contains(driver.GetProductID(), int(hidDevice.ProductID)) &&
 				slices.Contains(driver.GetVendorID(), int(hidDevice.VendorID)) {
 				drivers = append(drivers, driver)
 				continue driverLoop
