@@ -42,7 +42,12 @@ func (dw *DeviceWatcher) GetAvailableDevices() []hid.DeviceInfo {
 }
 
 func (dw *DeviceWatcher) StartDeviceMonitor(ctx context.Context) <-chan []Driver {
-	ch := make(chan []Driver)
+	ch := make(chan []Driver, 1)
+
+	drivers, changed := dw.updateDriverList(ctx)
+	if changed {
+		ch <- drivers
+	}
 
 	go func() {
 		ticker := time.NewTicker(5 * time.Second)
