@@ -102,7 +102,7 @@ func (dw *DeviceWatcher) addDeviceInfoOrCreateKeychronM3Driver(ctx context.Conte
 		}
 		err = newDriver.Init(ctx)
 		if err != nil {
-			slog.Error("Failed to init driver", "driver", &newDriver)
+			slog.Error("Failed to init driver", "error", err)
 		}
 		newDriver.StartBackgroundCheck(ctx)
 		dw.drivers = append(dw.drivers, newDriver)
@@ -129,7 +129,7 @@ func (dw *DeviceWatcher) addDeviceInfoOrCreateKeychronM6Driver(ctx context.Conte
 		}
 		err = newDriver.Init(ctx)
 		if err != nil {
-			slog.Error("Failed to init driver", "driver", &newDriver)
+			slog.Error("Failed to init driver", "error", err)
 		}
 		newDriver.StartBackgroundCheck(ctx)
 		dw.drivers = append(dw.drivers, newDriver)
@@ -152,7 +152,7 @@ func (dw *DeviceWatcher) removeDeviceInfoOrDeleteDriver(hidInfo hid.DeviceInfo) 
 
 func (dw *DeviceWatcher) addedAndRemovedDeviceInfo(hidInfo []hid.DeviceInfo) ([]hid.DeviceInfo, []hid.DeviceInfo) {
 	for unknownDevice, lastAttempt := range dw.unknownList {
-		if time.Now().Unix()-lastAttempt.Unix() > 5*60 {
+		if time.Now().Unix()-lastAttempt.Unix() > 60*60 {
 			delete(dw.unknownList, unknownDevice)
 		}
 	}
