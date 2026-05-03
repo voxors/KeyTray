@@ -11,6 +11,7 @@ import (
 	"github.com/samber/mo"
 	"github.com/sstallion/go-hid"
 	"github.com/voxors/KeyTray/src/pkg/broadcast"
+	"github.com/voxors/KeyTray/src/pkg/driver/dtype"
 )
 
 const (
@@ -23,13 +24,17 @@ const (
 type keychronM3Info struct {
 	dongleMutex            sync.Mutex
 	deviceMutex            sync.Mutex
+	dongleInfo             mo.Option[hid.DeviceInfo]
+	deviceInfo             mo.Option[hid.DeviceInfo]
 	batteryPercentage      mo.Option[int]
 	batteryPercentageMutex sync.RWMutex
 	batteryBroadcast       broadcast.Broadcast[int]
 	isCharging             mo.Option[bool]
 	isChargingMutex        sync.RWMutex
 	isChargingBroadcast    broadcast.Broadcast[bool]
-	cancelContext          mo.Option[context.CancelFunc]
+	cancelContextDongle    mo.Option[context.CancelFunc]
+	cancelContextDevice    mo.Option[context.CancelFunc]
+	backgroundWatchStarted bool
 }
 
 var (
@@ -37,9 +42,10 @@ var (
 	ErrDataNotFound    = errors.New("data not found")
 	ErrDeviceNotFound  = errors.New("device not found")
 	ErrInvalidResponse = errors.New("invalid response")
+	ErrNoDevice        = errors.New("no device set in the driver")
 )
 
-func CheckHidInfoValid(hidDevice *hid.DeviceInfo) bool {
+func CheckHidInfoValid(hidDevice hid.DeviceInfo) bool {
 	if hidDevice.VendorID == VENDOR_ID &&
 		hidDevice.UsagePage == BATTERY_USAGE_PAGE &&
 		(hidDevice.ProductID == PRODUCT_ID_DEVICE ||
@@ -49,24 +55,22 @@ func CheckHidInfoValid(hidDevice *hid.DeviceInfo) bool {
 	return false
 }
 
-func NewKeychronM3Driver(hidDevice *hid.DeviceInfo) mo.Result[*keychronM3Info] {
-	if hidDevice.VendorID != VENDOR_ID ||
-		hidDevice.ProductID != PRODUCT_ID_DONGLE &&
-			hidDevice.ProductID != PRODUCT_ID_DEVICE {
-		return mo.Err[*keychronM3Info](ErrInvalidDevice)
-	}
-
-	return mo.Ok(&keychronM3Info{
+func NewKeychronM3Driver() *keychronM3Info {
+	return &keychronM3Info{
 		dongleMutex:            sync.Mutex{},
 		deviceMutex:            sync.Mutex{},
 		batteryPercentage:      mo.None[int](),
 		batteryPercentageMutex: sync.RWMutex{},
 		batteryBroadcast:       broadcast.NewBroadcast[int](),
-		isCharging:             mo.Option[bool]{},
+		isCharging:             mo.None[bool](),
 		isChargingMutex:        sync.RWMutex{},
 		isChargingBroadcast:    broadcast.NewBroadcast[bool](),
-		cancelContext:          mo.None[context.CancelFunc](),
-	})
+		dongleInfo:             mo.None[hid.DeviceInfo](),
+		deviceInfo:             mo.None[hid.DeviceInfo](),
+		cancelContextDongle:    mo.None[context.CancelFunc](),
+		cancelContextDevice:    mo.None[context.CancelFunc](),
+		backgroundWatchStarted: false,
+	}
 }
 
 func (k *keychronM3Info) setCurrentPercentage(percentage int) {
@@ -96,60 +100,54 @@ func (k *keychronM3Info) setIsCharging(isCharging bool) {
 }
 
 func (k *keychronM3Info) StartBackgroundCheck(ctx context.Context) {
-	if k.cancelContext.IsSome() {
-		k.cancelContext.MustGet()()
+	if k.deviceInfo.IsSome() {
+		k.startDeviceWorker(ctx)
 	}
-	cancelctx, cancel := context.WithCancel(ctx)
-	k.cancelContext = mo.Some(cancel)
-	go k.workerPercentageInteruptListener(cancelctx, PRODUCT_ID_DEVICE)
-	go k.workerPercentageInteruptListener(cancelctx, PRODUCT_ID_DONGLE)
+	if k.dongleInfo.IsSome() {
+		k.startDongleWorker(ctx)
+	}
+	k.backgroundWatchStarted = true
+}
+
+func (k *keychronM3Info) startDongleWorker(ctx context.Context) {
+	if k.cancelContextDongle.IsSome() {
+		k.cancelContextDongle.MustGet()()
+	}
+	if k.dongleInfo.IsNone() {
+		slog.Error("Failed to start dongle worker")
+	} else {
+		go k.workerPercentageInteruptListener(ctx, k.dongleInfo.MustGet())
+	}
+}
+
+func (k *keychronM3Info) startDeviceWorker(ctx context.Context) {
+	if k.cancelContextDevice.IsSome() {
+		k.cancelContextDevice.MustGet()()
+	}
+	if k.deviceInfo.IsNone() {
+		slog.Error("Failed to start device worker")
+	} else {
+		go k.workerPercentageInteruptListener(ctx, k.deviceInfo.MustGet())
+	}
 }
 
 func (k *keychronM3Info) StopBackgroundCheck() {
-	if k.cancelContext.IsSome() {
-		k.cancelContext.MustGet()()
+	if k.cancelContextDevice.IsSome() {
+		k.cancelContextDevice.MustGet()()
 	}
+	if k.cancelContextDongle.IsSome() {
+		k.cancelContextDongle.MustGet()()
+	}
+	k.backgroundWatchStarted = false
 }
 
-func (k *keychronM3Info) workerPercentageInteruptListener(ctx context.Context, productID int) {
-	deviceNotFoundWarmed := false
+func (k *keychronM3Info) workerPercentageInteruptListener(ctx context.Context, deviceInfo hid.DeviceInfo) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
 		}
-
-		var deviceInfo *hid.DeviceInfo
-		err := hid.Enumerate(VENDOR_ID, hid.ProductIDAny, func(info *hid.DeviceInfo) error {
-			if deviceInfo == nil &&
-				CheckHidInfoValid(info) &&
-				info.ProductID == uint16(productID) {
-				deviceInfo = info
-			}
-			return nil
-		})
-		if err != nil {
-			slog.Error("Failed to enumerate devices", "error", err)
-		}
-
-		if deviceInfo == nil {
-			if !deviceNotFoundWarmed {
-				slog.Warn(
-					"Device not found",
-					"Vendor ID", fmt.Sprintf("0x%x", VENDOR_ID),
-					"Product ID", fmt.Sprintf("0x%x", productID),
-				)
-				deviceNotFoundWarmed = true
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(5 * time.Second):
-				continue
-			}
-		}
-		deviceNotFoundWarmed = false
 
 		var mutex *sync.Mutex
 		switch deviceInfo.ProductID {
@@ -172,7 +170,7 @@ func (k *keychronM3Info) workerPercentageInteruptListener(ctx context.Context, p
 			<-context.Done()
 			err := device.Close()
 			if err != nil {
-				slog.Warn("Failed to close device", "Product ID", fmt.Sprintf("0x%x", productID))
+				slog.Warn("Failed to close device", "Product ID", fmt.Sprintf("0x%x", deviceInfo.ProductID))
 			}
 		}(device, connectionCtx)
 
@@ -213,19 +211,13 @@ func (k *keychronM3Info) workerPercentageInteruptListener(ctx context.Context, p
 }
 
 func (k *keychronM3Info) getPercentageThroughtFeatureReport(ctx context.Context) mo.Result[int] {
-	var deviceInfo *hid.DeviceInfo
-	err := hid.Enumerate(VENDOR_ID, hid.ProductIDAny, func(info *hid.DeviceInfo) error {
-		if deviceInfo == nil && CheckHidInfoValid(info) {
-			deviceInfo = info
-		}
-		return nil
-	})
-	if err != nil {
-		return mo.Err[int](err)
-	}
-
-	if deviceInfo == nil {
-		return mo.Err[int](ErrDeviceNotFound)
+	var deviceInfo hid.DeviceInfo
+	if k.deviceInfo.IsSome() {
+		deviceInfo = k.deviceInfo.MustGet()
+	} else if k.dongleInfo.IsSome() {
+		deviceInfo = k.dongleInfo.MustGet()
+	} else {
+		return mo.Err[int](ErrNoDevice)
 	}
 
 	var mutex *sync.Mutex
@@ -244,14 +236,12 @@ func (k *keychronM3Info) getPercentageThroughtFeatureReport(ctx context.Context)
 	if err != nil {
 		return mo.Err[int](err)
 	}
-	defer func(device *hid.Device) {
-		if device != nil {
-			err := device.Close()
-			if err != nil {
-				slog.Warn("Failed to close device", "device", device)
-			}
+	defer func(device hid.Device) {
+		err := device.Close()
+		if err != nil {
+			slog.Error("Failed to close device", "device", device)
 		}
-	}(device)
+	}(*device)
 
 	buffer := make([]byte, 64)
 
@@ -286,7 +276,7 @@ func (k *keychronM3Info) getPercentageThroughtFeatureReport(ctx context.Context)
 	return mo.Err[int](lasterr)
 }
 
-func (*keychronM3Info) getfeatureReport(buffer []byte, device *hid.Device, deviceInfo *hid.DeviceInfo) error {
+func (*keychronM3Info) getfeatureReport(buffer []byte, device *hid.Device, deviceInfo hid.DeviceInfo) error {
 	buffer[0] = 0x51
 	readlen, err := device.GetFeatureReport(buffer)
 	slog.Debug(
@@ -356,4 +346,55 @@ func (k *keychronM3Info) GetVendorID() []int {
 
 func (k *keychronM3Info) GetDeviceName() string {
 	return "Keychron M3"
+}
+
+func (k *keychronM3Info) GetDeviceInfo() []hid.DeviceInfo {
+	deviceList := make([]hid.DeviceInfo, 0)
+	if k.deviceInfo.IsSome() {
+		deviceList = append(deviceList, k.deviceInfo.MustGet())
+	}
+	if k.dongleInfo.IsSome() {
+		deviceList = append(deviceList, k.dongleInfo.MustGet())
+	}
+	return deviceList
+}
+
+func (k *keychronM3Info) AddDeviceInfo(ctx context.Context, info hid.DeviceInfo) error {
+	switch info.ProductID {
+	case PRODUCT_ID_DEVICE:
+		k.deviceInfo = mo.Some(info)
+		if k.backgroundWatchStarted {
+			k.startDeviceWorker(ctx)
+		}
+	case PRODUCT_ID_DONGLE:
+		k.dongleInfo = mo.Some(info)
+		if k.backgroundWatchStarted {
+			k.startDongleWorker(ctx)
+		}
+	default:
+		return ErrInvalidDevice
+	}
+
+	return nil
+}
+
+func (k *keychronM3Info) RemoveDeviceInfo(info hid.DeviceInfo) {
+	if k.dongleInfo.IsSome() && k.dongleInfo.MustGet() == info {
+		if k.cancelContextDongle.IsSome() {
+			k.cancelContextDongle.MustGet()()
+			k.cancelContextDongle = mo.None[context.CancelFunc]()
+		}
+		k.dongleInfo = mo.None[hid.DeviceInfo]()
+	}
+	if k.deviceInfo.IsSome() && k.deviceInfo.MustGet() == info {
+		if k.cancelContextDevice.IsSome() {
+			k.cancelContextDevice.MustGet()()
+			k.cancelContextDevice = mo.None[context.CancelFunc]()
+		}
+		k.deviceInfo = mo.None[hid.DeviceInfo]()
+	}
+}
+
+func (k *keychronM3Info) GetDriverType() int {
+	return dtype.KeychronM3
 }

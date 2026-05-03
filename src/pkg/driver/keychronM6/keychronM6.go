@@ -11,51 +11,56 @@ import (
 	"github.com/samber/mo"
 	"github.com/sstallion/go-hid"
 	"github.com/voxors/KeyTray/src/pkg/broadcast"
+	"github.com/voxors/KeyTray/src/pkg/driver/dtype"
 )
 
 const (
-	VENDOR_ID          = 0x3434
-	PRODUCT_ID_DONGLE  = 0xD026
-	PRODUCT_ID_DEVICE  = 0xD060
-	BATTERY_USAGE_PAGE = 140
+	VENDOR_ID                 = 0x3434
+	PRODUCT_ID_DONGLE_USB_A   = 0xD026
+	PRODUCT_ID_DONGLE_USB_C   = 0xD029
+	PRODUCT_ID_DEVICE         = 0xD060
+	BATTERY_USAGE_PAGE_DONGLE = 0x8C
+	BATTERY_USAGE_PAGE_DEVICE = 0xFFC1
 )
 
 type keychronM6Info struct {
 	dongleMutex            sync.Mutex
 	deviceMutex            sync.Mutex
+	dongleInfo             mo.Option[hid.DeviceInfo]
+	deviceInfo             mo.Option[hid.DeviceInfo]
 	batteryPercentage      mo.Option[int]
 	batteryPercentageMutex sync.RWMutex
 	batteryBroadcast       broadcast.Broadcast[int]
 	isCharging             mo.Option[bool]
 	isChargingMutex        sync.RWMutex
 	isChargingBroadcast    broadcast.Broadcast[bool]
-	cancelContext          mo.Option[context.CancelFunc]
+	cancelContextDongle    mo.Option[context.CancelFunc]
+	cancelContextDevice    mo.Option[context.CancelFunc]
+	backgroundWatchStarted bool
 }
 
 var (
-	ErrInvalidDevice   = errors.New("invalid device")
-	ErrDataNotFound    = errors.New("data not found")
-	ErrDeviceNotFound  = errors.New("device not found")
-	ErrInvalidResponse = errors.New("invalid response")
+	ErrInvalidDevice        = errors.New("invalid device")
+	ErrDataNotFound         = errors.New("data not found")
+	ErrDeviceNotFound       = errors.New("device not found")
+	ErrInvalidResponse      = errors.New("invalid response")
+	ErrInvalidDeviceFeature = errors.New("invalid device for feature request")
+	ErrNoDevice             = errors.New("no device set in the driver")
 )
 
-func CheckHidInfoValid(hidDevice *hid.DeviceInfo) bool {
+func CheckHidInfoValid(hidDevice hid.DeviceInfo) bool {
 	if hidDevice.VendorID == VENDOR_ID &&
-		(hidDevice.ProductID == PRODUCT_ID_DEVICE && hidDevice.UsagePage == 0xFFC1) ||
-		(hidDevice.ProductID == PRODUCT_ID_DONGLE && hidDevice.UsagePage == BATTERY_USAGE_PAGE) {
+		(hidDevice.ProductID == PRODUCT_ID_DEVICE && hidDevice.UsagePage == BATTERY_USAGE_PAGE_DEVICE) ||
+		((hidDevice.ProductID == PRODUCT_ID_DONGLE_USB_A ||
+			hidDevice.ProductID == PRODUCT_ID_DONGLE_USB_C) &&
+			hidDevice.UsagePage == BATTERY_USAGE_PAGE_DONGLE) {
 		return true
 	}
 	return false
 }
 
-func NewKeychronM6Driver(hidDevice *hid.DeviceInfo) mo.Result[*keychronM6Info] {
-	if hidDevice.VendorID != VENDOR_ID ||
-		hidDevice.ProductID != PRODUCT_ID_DONGLE &&
-			hidDevice.ProductID != PRODUCT_ID_DEVICE {
-		return mo.Err[*keychronM6Info](ErrInvalidDevice)
-	}
-
-	return mo.Ok(&keychronM6Info{
+func NewKeychronM6Driver() *keychronM6Info {
+	return &keychronM6Info{
 		dongleMutex:            sync.Mutex{},
 		deviceMutex:            sync.Mutex{},
 		batteryPercentage:      mo.None[int](),
@@ -64,8 +69,12 @@ func NewKeychronM6Driver(hidDevice *hid.DeviceInfo) mo.Result[*keychronM6Info] {
 		isCharging:             mo.Option[bool]{},
 		isChargingMutex:        sync.RWMutex{},
 		isChargingBroadcast:    broadcast.NewBroadcast[bool](),
-		cancelContext:          mo.None[context.CancelFunc](),
-	})
+		dongleInfo:             mo.None[hid.DeviceInfo](),
+		deviceInfo:             mo.None[hid.DeviceInfo](),
+		cancelContextDongle:    mo.None[context.CancelFunc](),
+		cancelContextDevice:    mo.None[context.CancelFunc](),
+		backgroundWatchStarted: false,
+	}
 }
 
 func (k *keychronM6Info) setCurrentPercentage(percentage int) {
@@ -95,23 +104,48 @@ func (k *keychronM6Info) setIsCharging(isCharging bool) {
 }
 
 func (k *keychronM6Info) StartBackgroundCheck(ctx context.Context) {
-	if k.cancelContext.IsSome() {
-		k.cancelContext.MustGet()()
+	if k.deviceInfo.IsSome() {
+		k.startDeviceWorker(ctx)
 	}
-	cancelctx, cancel := context.WithCancel(ctx)
-	k.cancelContext = mo.Some(cancel)
-	go k.workerPercentageInteruptListener(cancelctx, PRODUCT_ID_DEVICE)
-	go k.workerPercentageInteruptListener(cancelctx, PRODUCT_ID_DONGLE)
+	if k.dongleInfo.IsSome() {
+		k.startDongleWorker(ctx)
+	}
+	k.backgroundWatchStarted = true
+}
+
+func (k *keychronM6Info) startDongleWorker(ctx context.Context) {
+	if k.cancelContextDongle.IsSome() {
+		k.cancelContextDongle.MustGet()()
+	}
+	if k.dongleInfo.IsNone() {
+		slog.Error("Failed to start dongle worker")
+	} else {
+		go k.workerPercentageInteruptListener(ctx, k.dongleInfo.MustGet())
+	}
+}
+
+func (k *keychronM6Info) startDeviceWorker(ctx context.Context) {
+	if k.cancelContextDevice.IsSome() {
+		k.cancelContextDevice.MustGet()()
+	}
+	if k.deviceInfo.IsNone() {
+		slog.Error("Failed to start device worker")
+	} else {
+		go k.workerPercentageInteruptListener(ctx, k.deviceInfo.MustGet())
+	}
 }
 
 func (k *keychronM6Info) StopBackgroundCheck() {
-	if k.cancelContext.IsSome() {
-		k.cancelContext.MustGet()()
+	if k.cancelContextDevice.IsSome() {
+		k.cancelContextDevice.MustGet()()
 	}
+	if k.cancelContextDongle.IsSome() {
+		k.cancelContextDongle.MustGet()()
+	}
+	k.backgroundWatchStarted = false
 }
 
-func (k *keychronM6Info) workerPercentageInteruptListener(ctx context.Context, productID int) {
-	deviceNotFoundWarmed := false
+func (k *keychronM6Info) workerPercentageInteruptListener(ctx context.Context, deviceInfo hid.DeviceInfo) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -119,40 +153,9 @@ func (k *keychronM6Info) workerPercentageInteruptListener(ctx context.Context, p
 		default:
 		}
 
-		var deviceInfo *hid.DeviceInfo
-		err := hid.Enumerate(VENDOR_ID, hid.ProductIDAny, func(info *hid.DeviceInfo) error {
-			if deviceInfo == nil &&
-				CheckHidInfoValid(info) &&
-				info.ProductID == uint16(productID) {
-				deviceInfo = info
-			}
-			return nil
-		})
-		if err != nil {
-			slog.Error("Failed to enumerate devices", "error", err)
-		}
-
-		if deviceInfo == nil {
-			if !deviceNotFoundWarmed {
-				slog.Warn(
-					"Device not found",
-					"Vendor ID", fmt.Sprintf("0x%x", VENDOR_ID),
-					"Product ID", fmt.Sprintf("0x%x", productID),
-				)
-				deviceNotFoundWarmed = true
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(5 * time.Second):
-				continue
-			}
-		}
-		deviceNotFoundWarmed = false
-
 		var mutex *sync.Mutex
 		switch deviceInfo.ProductID {
-		case PRODUCT_ID_DONGLE:
+		case PRODUCT_ID_DONGLE_USB_A:
 			mutex = &k.dongleMutex
 		case PRODUCT_ID_DEVICE:
 			mutex = &k.deviceMutex
@@ -171,7 +174,7 @@ func (k *keychronM6Info) workerPercentageInteruptListener(ctx context.Context, p
 			<-context.Done()
 			err := device.Close()
 			if err != nil {
-				slog.Warn("Failed to close device", "Product ID", fmt.Sprintf("0x%x", productID))
+				slog.Warn("Failed to close device", "Product ID", fmt.Sprintf("0x%x", deviceInfo.ProductID))
 			}
 		}(device, connectionCtx)
 
@@ -212,26 +215,18 @@ func (k *keychronM6Info) workerPercentageInteruptListener(ctx context.Context, p
 }
 
 func (k *keychronM6Info) getPercentageThroughtFeatureReport(ctx context.Context) mo.Result[int] {
-	var deviceInfo *hid.DeviceInfo
-	err := hid.Enumerate(VENDOR_ID, hid.ProductIDAny, func(info *hid.DeviceInfo) error {
-		if CheckHidInfoValid(info) {
-			if deviceInfo == nil || (deviceInfo != nil && deviceInfo.ProductID != PRODUCT_ID_DEVICE) {
-				deviceInfo = info
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return mo.Err[int](err)
-	}
-
-	if deviceInfo == nil {
-		return mo.Err[int](ErrDeviceNotFound)
+	var deviceInfo hid.DeviceInfo
+	if k.deviceInfo.IsSome() {
+		deviceInfo = k.deviceInfo.MustGet()
+	} else if k.dongleInfo.IsSome() {
+		deviceInfo = k.dongleInfo.MustGet()
+	} else {
+		return mo.Err[int](ErrNoDevice)
 	}
 
 	var mutex *sync.Mutex
 	switch deviceInfo.ProductID {
-	case PRODUCT_ID_DONGLE:
+	case PRODUCT_ID_DONGLE_USB_A:
 		mutex = &k.dongleMutex
 	case PRODUCT_ID_DEVICE:
 		mutex = &k.deviceMutex
@@ -287,37 +282,30 @@ func (k *keychronM6Info) getPercentageThroughtFeatureReport(ctx context.Context)
 	return mo.Err[int](lasterr)
 }
 
-func (*keychronM6Info) getfeatureReport(buffer []byte, device *hid.Device, deviceInfo *hid.DeviceInfo) error {
-	var readlen int
+func (*keychronM6Info) getfeatureReport(buffer []byte, device *hid.Device, deviceInfo hid.DeviceInfo) error {
+	payload := make([]byte, 64)
+	payload[0] = 0xb3
+	payload[1] = 0x06
 	switch deviceInfo.ProductID {
 	case PRODUCT_ID_DEVICE:
-		payload := make([]byte, 64)
-		payload[0] = 0xb3
-		payload[1] = 0x06
 		_, err := device.SendOutputReport(payload)
 		if err != nil {
 			return err
 		}
-
-		readlen, err = device.Read(buffer)
-		if err != nil {
-			return err
-		}
-	case PRODUCT_ID_DONGLE:
-		payload := make([]byte, 64)
-		payload[0] = 0xb3
-		payload[1] = 0x06
+	case PRODUCT_ID_DONGLE_USB_A:
+		fallthrough
+	case PRODUCT_ID_DONGLE_USB_C:
 		_, err := device.Write(payload)
 		if err != nil {
 			return err
 		}
-
-		readlen, err = device.Read(buffer)
-		if err != nil {
-			return err
-		}
 	default:
-		return ErrDeviceNotFound
+		return ErrInvalidDeviceFeature
+	}
+
+	readlen, err := device.Read(buffer)
+	if err != nil {
+		return err
 	}
 
 	isAllZero := true
@@ -369,7 +357,7 @@ func (k *keychronM6Info) UnsubscribeIsChargin(channel chan bool) {
 }
 
 func (k *keychronM6Info) GetProductID() []int {
-	return []int{PRODUCT_ID_DEVICE, PRODUCT_ID_DONGLE}
+	return []int{PRODUCT_ID_DEVICE, PRODUCT_ID_DONGLE_USB_A}
 }
 
 func (k *keychronM6Info) GetVendorID() []int {
@@ -378,4 +366,57 @@ func (k *keychronM6Info) GetVendorID() []int {
 
 func (k *keychronM6Info) GetDeviceName() string {
 	return "Keychron M6"
+}
+
+func (k *keychronM6Info) GetDeviceInfo() []hid.DeviceInfo {
+	deviceList := make([]hid.DeviceInfo, 0)
+	if k.deviceInfo.IsSome() {
+		deviceList = append(deviceList, k.deviceInfo.MustGet())
+	}
+	if k.dongleInfo.IsSome() {
+		deviceList = append(deviceList, k.dongleInfo.MustGet())
+	}
+	return deviceList
+}
+
+func (k *keychronM6Info) AddDeviceInfo(ctx context.Context, info hid.DeviceInfo) error {
+	switch info.ProductID {
+	case PRODUCT_ID_DEVICE:
+		k.deviceInfo = mo.Some(info)
+		if k.backgroundWatchStarted {
+			k.startDeviceWorker(ctx)
+		}
+	case PRODUCT_ID_DONGLE_USB_A:
+		fallthrough
+	case PRODUCT_ID_DONGLE_USB_C:
+		k.dongleInfo = mo.Some(info)
+		if k.backgroundWatchStarted {
+			k.startDongleWorker(ctx)
+		}
+	default:
+		return ErrInvalidDevice
+	}
+
+	return nil
+}
+
+func (k *keychronM6Info) RemoveDeviceInfo(info hid.DeviceInfo) {
+	if k.dongleInfo.IsSome() && k.dongleInfo.MustGet() == info {
+		if k.cancelContextDongle.IsSome() {
+			k.cancelContextDongle.MustGet()()
+			k.cancelContextDongle = mo.None[context.CancelFunc]()
+		}
+		k.dongleInfo = mo.None[hid.DeviceInfo]()
+	}
+	if k.deviceInfo.IsSome() && k.deviceInfo.MustGet() == info {
+		if k.cancelContextDevice.IsSome() {
+			k.cancelContextDevice.MustGet()()
+			k.cancelContextDevice = mo.None[context.CancelFunc]()
+		}
+		k.deviceInfo = mo.None[hid.DeviceInfo]()
+	}
+}
+
+func (k *keychronM6Info) GetDriverType() int {
+	return dtype.KeychronM6
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/samber/mo"
+	"github.com/sstallion/go-hid"
 )
 
 type Driver interface {
@@ -19,4 +20,8 @@ type Driver interface {
 	GetProductID() []int
 	GetVendorID() []int
 	GetDeviceName() string
+	GetDeviceInfo() []hid.DeviceInfo
+	AddDeviceInfo(context.Context, hid.DeviceInfo) error
+	RemoveDeviceInfo(hid.DeviceInfo)
+	GetDriverType() int
 }
