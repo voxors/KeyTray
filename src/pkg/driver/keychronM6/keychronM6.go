@@ -201,8 +201,12 @@ func (k *keychronM6Info) workerPercentageInteruptListener(ctx context.Context, d
 				)
 
 				if buffer[1] == 0xE2 {
-					k.setCurrentPercentage(int(buffer[5]))
-					k.setIsCharging(buffer[4] != 0)
+					if buffer[5] != 0xFF {
+						k.setCurrentPercentage(int(buffer[5]))
+					}
+					if buffer[4] != 0xFF {
+						k.setIsCharging(buffer[4] != 0)
+					}
 				}
 			}
 		}
