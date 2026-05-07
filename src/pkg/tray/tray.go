@@ -119,23 +119,19 @@ func (k *Keytray) updateTray() error {
 			}
 		}
 		if batteryMenuItem, ok := k.batteryItems[driver]; ok {
-			err := batteryMenuItem.SetProps(
-				tray.MenuItemLabel(tooltipText),
-				tray.MenuItemIconName(iconName),
-			)
+			err := batteryMenuItem.Remove()
 			if err != nil {
 				return err
 			}
-		} else {
-			batteryMenuItem, err := k.item.Menu().AddChild(
-				tray.MenuItemLabel(tooltipText),
-				tray.MenuItemIconName(iconName),
-			)
-			if err != nil {
-				return err
-			}
-			k.batteryItems[driver] = batteryMenuItem
 		}
+		batteryMenuItem, err := k.item.Menu().AddChild(
+			tray.MenuItemLabel(tooltipText),
+			tray.MenuItemIconName(iconName),
+		)
+		if err != nil {
+			return err
+		}
+		k.batteryItems[driver] = batteryMenuItem
 	}
 
 	newBatteryMenuItemsMap := make(map[device.Driver]*tray.MenuItem)
